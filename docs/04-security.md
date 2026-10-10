@@ -1,17 +1,30 @@
 # Security
 
+The security properties Ballast is designed to hold, and where to find the attacks against them.
+
 ## Trust model
 
 - **No privileged roles.** No owner, upgrade path, pause or admin withdrawal. If a flaw is found, the fix is a new hook and an LP migration.
 - **Pool-owned reserve.** Surcharges belong to the pool that collected them and are only paid out to that pool's LPs.
-- **Immutable parameters.** k, c, H, m and the oracle are fixed in `afterInitialize`.
-- **Withdrawals always succeed.** The hook never makes liquidity removal revert. The worst case for an LP is a payout of zero.
-- **Minimal external surface.** Payout is a `take` from the PoolManager. The hook makes no calls to the LP and executes no swaps.
+- **Immutable parameters.** k, c, H, m and the oracle are fixed in `afterInitialize` and cannot change.
+- **Withdrawals always succeed.** The hook never makes liquidity removal revert. When the reserve is empty, or a claim fails any rule, the payout is zero and the removal goes through.
+- **Minimal external surface.** The hook makes no calls to the LP and executes no swaps.
 
-Several of these properties are not yet guaranteed by the design. AV-03, AV-17, AV-18 and AV-19 cover the gaps.
+## Custody
+
+The hook holds no tokens directly. Reserve balances are ERC-6909 claims on the PoolManager, tracked per pool. A payout is a burn plus `take` inside the PoolManager's unlock callback, so standard v4 locking applies.
+
+## Known gaps
+
+The current design does not yet guarantee every property above:
+
+| Property | At risk from |
+| --- | --- |
+| Pool-owned reserve | [AV-18](06-attack-vectors.md#av-18-cross-pool-drain), [AV-19](06-attack-vectors.md#av-19-initializer-set-parameters) |
+| Payout reaches the LP | [AV-03](06-attack-vectors.md#av-03-payout-recipient) |
+| Withdrawals always succeed | [AV-17](06-attack-vectors.md#av-17-oracle-failure-blocks-withdrawals), [AV-21](06-attack-vectors.md#av-21-unsettled-hook-delta) |
+| Minimal external surface | [AV-20](06-attack-vectors.md#av-20-reentrancy-during-payout) |
 
 ## Attack surface
 
-All known attacks, the current defense against each, and the checks that close them are in [07-attack-vectors.md](07-attack-vectors.md).
-
-Vectors marked `design-fix` need a change in `design-logic.md` before implementation: AV-02, AV-03, AV-05, AV-06, AV-12, AV-13, AV-15 and AV-19.
+Every known attack, the defense the design offers against it, and the checks that close it are in [Attack vectors](06-attack-vectors.md). That page is the single list. Other pages link to it by ID (AV-nn) and do not describe attacks themselves.

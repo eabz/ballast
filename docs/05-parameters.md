@@ -1,6 +1,6 @@
 # Parameters
 
-Four numbers decide whether the economics work. All four come from replaying real pool history, not from estimates.
+Four numbers decide whether the economics work. All four are fixed by replaying real pool history, not by estimates; the backtest is tracked in the [roadmap](roadmap.md#backtest-plan).
 
 | Parameter | Meaning | Starting range |
 | --- | --- | --- |
@@ -11,24 +11,26 @@ Four numbers decide whether the economics work. All four come from replaying rea
 
 The price reference is a choice rather than a number: a Chainlink feed where one exists, otherwise the pool's own TWAP over at least 30 minutes.
 
-## Backtest
+All five are fixed in `afterInitialize` and feed the surcharge and payout as follows:
 
-Replay several months of swaps and liquidity events from the Base ETH/USDC v4 pool. The code is in `backtest/` ([README](../backtest/README.md)).
-
-For each candidate k:
-
-1. Accumulate the reserve swap by swap using loss = Δy − Δx·P₁.
-2. For each closed position, compute realized IL at the entry and exit reference prices.
-3. Apply the payout rules under each candidate c, H and m.
-
-Report:
-
-- Reserve-to-claims ratio over time.
-- Share of losing LPs paid up to c.
-- Surcharge in bps of volume, on median trades and in aggregate.
-- Whether splitting a position across salts beats the pro-rata cap ([AV-07](07-attack-vectors.md#av-07-splitting-across-salts)).
-- Reserve accrual when arbitrageurs split swaps ([AV-12](07-attack-vectors.md#av-12-swap-splitting)).
-
-## Success criterion
-
-The economics work if some k keeps the surcharge under about 2 bps of volume on median trades and still funds payouts at c ≥ 0.3.
+```mermaid
+flowchart TD
+    subgraph inputs["Fixed at afterInitialize"]
+        k[k · ballast rate]
+        c[c · coverage cap]
+        H[H · minimum hold]
+        m[m · pro-rata multiplier]
+        O[oracle · Chainlink or long TWAP]
+    end
+    k --> SUR[Per-swap surcharge]
+    SUR --> R[(Reserve)]
+    O --> Pe[Pₑ at entry]
+    O --> Px[Pₓ at exit]
+    Pe --> IL[Realized IL]
+    Px --> IL
+    c --> PAY[Payout]
+    H --> PAY
+    m --> PAY
+    IL --> PAY
+    R --> PAY
+```

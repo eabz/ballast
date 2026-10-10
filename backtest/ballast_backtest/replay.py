@@ -218,12 +218,48 @@ def simulate(sm, mods, init, k, c, H, m, loss_col, twap=None):
     return closes, summary
 
 
+def splitting_analysis(sm, swaps, k):
+    """AV-12. How much of the per-swap surcharge survives if the loss is measured per unlock (tx) or per
+    block instead of per swap, and what rational splitting of large swaps into N pieces would do."""
+    a0 = swaps["amount0"].values / DEC0
+    a1 = swaps["amount1"].values / DEC1
+    df = pd.DataFrame({"tx": swaps["tx"].values, "block": sm["block"].values, "a0": a0, "a1": a1,
+                       "p1": sm["p1"].values, "fee_val": sm["fee_val"].values, "notional": sm["notional"].values})
+    base_net = k * np.maximum(sm["loss_net"].values, 0).sum()
+    base_gross = k * np.maximum(sm["loss_gross"].values, 0).sum()
+    rows = []
+    for name, keys in (("per swap", None), ("per tx (unlock)", ["tx"]), ("per block", ["block"])):
+        if keys is None:
+            rows.append({"measure": name, "surcharge_net": base_net, "surcharge_gross": base_gross, "groups": len(df)})
+            continue
+        g = df.groupby(keys, sort=False).agg(a0=("a0", "sum"), a1=("a1", "sum"), p1=("p1", "last"), fee=("fee_val", "sum"))
+        net = g["a0"] * g["p1"] + g["a1"]
+        rows.append({"measure": name, "surcharge_net": k * np.maximum(net, 0).sum(),
+                     "surcharge_gross": k * np.maximum(net + g["fee"], 0).sum(), "groups": len(g)})
+    agg = pd.DataFrame(rows)
+    agg["share_of_per_swap_net"] = agg["surcharge_net"] / base_net
+    agg["share_of_per_swap_gross"] = agg["surcharge_gross"] / base_gross
+
+    # Rational splitting: loss ~ size^2 for small moves, so N equal pieces pay ~1/N. Apply to swaps above a notional threshold.
+    lg = np.maximum(sm["loss_gross"].values, 0)
+    n = sm["notional"].values
+    srows = []
+    for thr in (10_000, 100_000):
+        big = n >= thr
+        for N in (2, 5, 10):
+            kept = lg[~big].sum() + lg[big].sum() / N
+            srows.append({"split_threshold_usd": thr, "N": N, "share_of_swaps_split": big.mean(),
+                          "reserve_share_remaining": kept / lg.sum()})
+    return agg, pd.DataFrame(srows)
+
+
 def surcharge_stats(sm, k, loss_col):
     loss = np.maximum(sm[loss_col].values, 0)
     s = k * loss
     n = sm["notional"].values
     ok = n > 0
-    bps = s[ok] / n[ok] * 1e4
+    s, n = s[ok], n[ok]
+    bps = s / n * 1e4
     return {
         "k": k, "loss": loss_col,
         "surcharge_usdc": float(s.sum()),
@@ -244,6 +280,7 @@ def main():
     ap.add_argument("--H", default="24,72", help="hours")
     ap.add_argument("--m", default="2,3,5")
     ap.add_argument("--twap-min", type=float, default=30)
+    ap.add_argument("--skip-days", type=float, default=0, help="ignore surcharges and closes in the first N days (launch liquidity is thin)")
     ap.add_argument("--out", default=None, help="directory for csv outputs")
     args = ap.parse_args()
 
@@ -252,6 +289,13 @@ def main():
     sm = swap_metrics(swaps)
     twap = Twap(sm["t"].values, sm["tick"].values, mods["t"].min() - 1, init["tick"], args.twap_min * 60)
     mods = prepare_mods(sm, mods, twap)
+    if args.skip_days:
+        cutoff = sm["t"].min() + args.skip_days * 86400
+        # Zero the surcharge stream before the cutoff but keep the price path and positions opened before it.
+        for col in ("loss_net", "loss_gross", "notional", "fee_val"):
+            sm.loc[sm["t"] < cutoff, col] = 0.0
+        mods = mods[(mods["liquidity_delta"] > 0) | (mods["t"] >= cutoff)]
+        print(f"skipping surcharges and closes before {pd.to_datetime(cutoff, unit='s'):%Y-%m-%d}")
 
     days = (sm["t"].max() - sm["t"].min()) / 86400
     vol = sm["notional"].sum()
@@ -268,6 +312,12 @@ def main():
     print("\n== Surcharge by k ==")
     ss = pd.DataFrame([surcharge_stats(sm, k, lc) for lc in ("loss_gross", "loss_net") for k in ks])
     print(ss.to_string(index=False, float_format=lambda v: f"{v:,.3f}"))
+
+    print("\n== AV-12: loss measured per swap vs per unlock vs per block (k=%s) ==" % ks[0])
+    agg, split = splitting_analysis(sm, swaps, ks[0])
+    print(agg.to_string(index=False, float_format=lambda v: f"{v:,.3f}"))
+    print("\n== AV-12: rational splitting of large swaps into N pieces (gross loss) ==")
+    print(split.to_string(index=False, float_format=lambda v: f"{v:,.3f}"))
 
     print("\n== Scenarios ==")
     res, all_closes = [], None
@@ -308,6 +358,8 @@ def main():
     if args.out:
         os.makedirs(args.out, exist_ok=True)
         monthly.to_csv(os.path.join(args.out, "monthly.csv"))
+        agg.to_csv(os.path.join(args.out, "av12_aggregation.csv"), index=False)
+        split.to_csv(os.path.join(args.out, "av12_splitting.csv"), index=False)
         ss.to_csv(os.path.join(args.out, "surcharge.csv"), index=False)
         rdf.to_csv(os.path.join(args.out, "scenarios.csv"), index=False)
         all_closes.to_csv(os.path.join(args.out, "closes_first_scenario.csv"), index=False)

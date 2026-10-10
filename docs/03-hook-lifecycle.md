@@ -16,7 +16,7 @@ Off: `beforeInitialize`, `beforeAddLiquidity`, `afterRemoveLiquidity`, both dona
 
 ## Custody
 
-The hook holds no tokens directly. Reserve balances are ERC-6909 claims on the PoolManager, tracked per pool. Payouts are a burn plus `take` inside the PoolManager's unlock callback.
+Reserve balances are ERC-6909 claims on the PoolManager. See [Security](04-security.md#custody).
 
 ## Swap flow
 
@@ -35,7 +35,7 @@ flowchart TD
     G --> K
 ```
 
-The loss is computed from the actual deltas, so swap direction and exact-in or exact-out do not change the formula. The currency charged on exact-output swaps is tracked in [AV-13](07-attack-vectors.md#av-13-exact-output-swaps).
+The loss is computed from the actual deltas, so swap direction and exact-in or exact-out do not change the formula. The currency charged on exact-output swaps is tracked in [AV-13](06-attack-vectors.md#av-13-exact-output-swaps).
 
 ## Payout flow
 
@@ -66,7 +66,11 @@ Every path ends with the removal going through.
 ```mermaid
 flowchart LR
     N[No record] -- "afterAddLiquidity<br/>store x₀, y₀, Pₑ, t₀" --> O[Open record]
-    O -- "afterAddLiquidity<br/>liquidity-weighted average entry" --> O
-    O -- "beforeRemoveLiquidity (partial)<br/>scale x₀, y₀; keep remainder" --> O
+    O -- "afterAddLiquidity<br/>liquidity-weighted average entry" --> O2[Open record, updated]
+    O2 -. same state .-> O
+    O -- "beforeRemoveLiquidity (partial)<br/>scale x₀, y₀; keep remainder" --> P[Open record, reduced]
+    P -. same state .-> O
     O -- "beforeRemoveLiquidity (full)<br/>clear" --> N
 ```
+
+Dotted edges mark the same state drawn twice for readability. Key: (owner, tickLower, tickUpper, salt).

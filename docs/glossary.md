@@ -17,7 +17,7 @@
 | **x₁, y₁** | Token0 and token1 amounts returned at exit. |
 | **Δx, Δy** | Token0 sold and token1 received in a swap, from the actual balance deltas. |
 | **Position key** | (owner, tickLower, tickUpper, salt), as in v4. |
-| **AV-nn** | Attack vector ID in [07-attack-vectors.md](07-attack-vectors.md). |
+| **AV-nn** | Attack vector ID in [06-attack-vectors.md](06-attack-vectors.md). |
 | **ERC-6909** | Multi-token claim standard the PoolManager uses for internal balances. |
 | **`vanillaSwap`** | Hook property: the swap curve is unmodified. |
 | **`BallastReserveHook`** | The contract. |

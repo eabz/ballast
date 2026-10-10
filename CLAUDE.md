@@ -4,7 +4,12 @@ Ballast is a Uniswap v4 hook (`BallastReserveHook`) that collects a per-swap sur
 
 ## Current phase
 
-Scaffolded, not implemented. `src/BallastReserveHook.sol` has the final permission flags and pass-through callbacks with a TODO per callback. Do not implement the economics until the backtest in `docs/05-parameters.md` has fixed k, c, H and m.
+Scaffolded, not implemented. `src/BallastReserveHook.sol` has the final permission flags and pass-through callbacks with a TODO per callback. Do not implement the economics until the backtest in `docs/roadmap.md` has fixed k, c, H and m and the `design-fix` vectors in `docs/06-attack-vectors.md` are resolved.
+
+## Docs layout
+
+- Security properties go in `docs/04-security.md`. Attacks go only in `docs/06-attack-vectors.md`; other pages link to them by AV ID.
+- Status, plans and next steps go only in `docs/roadmap.md`, which is temporary and will be deleted.
 
 ## Commands
 

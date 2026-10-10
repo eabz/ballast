@@ -82,9 +82,7 @@ The reserve is never a promise. Four rules keep it solvent and hard to game.
 | Minimum hold | Positions open less than H (e.g. 24h) get no payout | Stops deposit → nudge price → withdraw → claim within a block or a few. |
 | Price reference | Chainlink feed where one exists; otherwise the pool's own TWAP over a long window (≥ 30 min) | A spot or short TWAP can be moved by the claimant. Entry and exit use the same reference, so the only way to inflate IL is to move a long-window price. |
 
-When the reserve is empty, withdrawals still succeed and pay nothing. The hook never blocks liquidity removal.
-
-The reserve belongs to the pool, not to the deployer. There is no admin withdrawal and no owner. Parameters (k, c, H, m, oracle) are fixed per pool at initialization and immutable thereafter.
+When the reserve is empty, withdrawals still succeed and pay nothing. Ownership, custody and the trust model: `04-security.md`.
 
 ## Hook lifecycle
 
@@ -100,35 +98,11 @@ Five permission bits are set; everything else is off. The swap curve is untouche
 
 `beforeAddLiquidity`, donate hooks and the liquidity return-delta flags stay off. The hook holds no funds outside the PoolManager; all reserve balances are ERC-6909 claims.
 
-## Attack surface
+## Security
 
-| Attack | Defense |
-| --- | --- |
-| Deposit, move the price, withdraw and claim IL | Minimum hold H; long-window or external reference price; pro-rata draw cap. Moving a 30-minute TWAP on a liquid pair costs more than the capped claim. |
-| Wash-trade to look like a loser | IL is measured against the reference price, not against the LP's own trades. Wash trades pay the surcharge and move nothing that matters. |
-| Split one position into many to beat the pro-rata cap | The cap is per claim but the multiplier m bounds total draw; many small positions each hold for H and each pay gas. Monitor in backtest; raise H or lower m if it is profitable. |
-| Sandwich the reference price at the exact block of withdrawal | External oracle, or TWAP window ≫ one block. |
-| Reserve-token mismatch: reserve holds token A, claimant is owed value in token B | Payout is denominated in value (token1 units) and paid in whatever mix the reserve holds, at the reference price. No swap is executed by the hook. |
-| Drain via reentrancy during payout | Payout is a `take` from the PoolManager inside the unlock callback; standard v4 locking applies, no external calls to the LP. |
-| Router or aggregator exploits the surcharge formula with exact-output swaps | Exact-output swaps are handled by computing the loss term from the actual deltas regardless of direction; tested both ways. |
+Trust model and custody: `04-security.md`. Attacks, defenses and open findings: `06-attack-vectors.md`.
 
-The hook has no owner, no upgrade path and no pause. If a flaw is found, the remedy is a new hook and LP migration, not an admin key.
-
-### Open findings
-
-Uncovered by the table above. Full register: `07-attack-vectors.md`.
-
-- **AV-01** Zero-delta `modifyLiquidity` runs `beforeRemoveLiquidity`; each call is a claim.
-- **AV-02** Exit and entry amounts follow spot; IL values them at Pₓ. Flash-moving spot inflates IL.
-- **AV-03** Callback `sender` is the router or PositionManager. Payout recipient undefined.
-- **AV-05** Top-up of an aged dust position inherits its entry time.
-- **AV-06** Liquidity share in L units favours narrow ranges and thin-liquidity ticks.
-- **AV-12** Splitting a swap into N pays about 1/N of the surcharge.
-- **AV-13** `afterSwapReturnDelta` charges only the unspecified currency; exact-output swaps cannot be charged in the output token. The exact-output row above is incorrect.
-- **AV-15 / AV-17** v4 core has no TWAP. Oracle failure at exit must not block removal.
-- **AV-18 / AV-19** ERC-6909 reserves are per currency; anyone can initialize a pool on the hook. Parameter and oracle source unspecified.
-
-## Parameters and next steps
+## Parameters
 
 Four numbers decide whether the economics close. None should be guessed; all come from replaying real pool history.
 
@@ -139,12 +113,6 @@ Four numbers decide whether the economics close. None should be guessed; all com
 | H | Minimum hold before a claim is valid | 24 – 72 h |
 | m | Pro-rata multiplier on a claim's liquidity share | 2 – 5 |
 
-Backtest, before any Solidity: replay ETH/USDC on Base (v4 pool, several months of swaps and liquidity events). For each candidate k, compute the reserve accumulated; for each closed position, compute realized IL and the payout under c, H, m. Report reserve-to-claims ratio, the share of losing LPs made whole to c, and the effective surcharge as bps of volume. The economics close if a k that keeps the surcharge under \~2 bps of volume on median trades funds payouts at c ≥ 0.3.
-
-- [ ] Backtest on Base ETH/USDC with the indexer; pick k, c, H, m
-- [ ] Scaffold `BallastReserveHook` from v4-template; mine the hook address for the five flags
-- [ ] Unit tests: surcharge both swap directions and both exact-in/exact-out; IL math on partial removals; reserve-empty path
-- [ ] Fork test against the live Base pool with replayed swaps
-- [ ] Testnet deploy (Unichain Sepolia), then registry submission and the Uniswap routing allowlist form
+The backtest that fixes these values and the delivery plan are in `roadmap.md`.
 
 Name note: a `BallastHook` already exists in the registry (an unrelated launchpad fee hook on Robinhood Chain). The contract is named `BallastReserveHook` to avoid the collision; the project name stays Ballast.

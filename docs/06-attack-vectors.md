@@ -1,6 +1,6 @@
 # Attack vectors
 
-Known ways to drain, misdirect or break `BallastReserveHook`. Each entry describes the attack, the defense the current design offers (if any), and the checks that close it. Work through this list before audit, and add new vectors here as they come up.
+Known ways to drain, misdirect or break `BallastReserveHook`. Each entry describes the attack, the defense the current design offers (if any), and the checks that close it. This is the only place attacks are described; other pages link here by ID. Add new vectors here as they come up.
 
 Severity:
 
@@ -72,7 +72,7 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 ### AV-04 Deposit, move the reference price, withdraw
 
 - **Attack**: deposit, move Pₓ, withdraw and claim.
-- **Defense**: minimum hold H, Chainlink or ≥ 30 min TWAP, pro-rata cap.
+- **Defense**: minimum hold H, Chainlink or ≥ 30 min TWAP, pro-rata cap. The design assumes moving a 30-minute TWAP on a liquid pair costs more than the capped claim.
 - **Check**
   - [ ] Test: claim inside H pays zero.
   - [ ] Simulation: cost to move the reference price vs the capped claim, at backtest depths.
@@ -97,7 +97,7 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 ### AV-07 Splitting across salts
 
 - **Attack**: N positions held for H, each capped at m × its own share.
-- **Defense**: H per position, gas per position.
+- **Defense**: each position must hold for H and pays its own gas. If the backtest shows splitting is profitable, raise H or lower m.
 - **Check**
   - [ ] Test and backtest: one position vs N salts of equal total value, net of Base gas.
 
@@ -204,7 +204,7 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 ### AV-20 Reentrancy during payout
 
 - **Attack**: reenter the hook or PoolManager during payout.
-- **Defense**: payout is a `take` inside the unlock; no external calls to the LP.
+- **Defense**: payout is a `take` inside the unlock, so standard v4 locking applies; no external calls to the LP.
 - **Check**
   - [ ] Test: ETH recipient contract and a callback token reentering on receipt.
 
