@@ -1,0 +1,19 @@
+[project]
+name = "ballast-backtest"
+version = "0.1.0"
+description = "Replay Uniswap v4 ETH/USDC history to size the Ballast reserve parameters k, c, H, m"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "pyarrow>=17.0",
+    "python-dotenv>=1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ballast_backtest"]

@@ -114,6 +114,20 @@ Five permission bits are set; everything else is off. The swap curve is untouche
 
 The hook has no owner, no upgrade path and no pause. If a flaw is found, the remedy is a new hook and LP migration, not an admin key.
 
+### Open findings
+
+Uncovered by the table above. Full register: `07-attack-vectors.md`.
+
+- **AV-01** Zero-delta `modifyLiquidity` runs `beforeRemoveLiquidity`; each call is a claim.
+- **AV-02** Exit and entry amounts follow spot; IL values them at Pₓ. Flash-moving spot inflates IL.
+- **AV-03** Callback `sender` is the router or PositionManager. Payout recipient undefined.
+- **AV-05** Top-up of an aged dust position inherits its entry time.
+- **AV-06** Liquidity share in L units favours narrow ranges and thin-liquidity ticks.
+- **AV-12** Splitting a swap into N pays about 1/N of the surcharge.
+- **AV-13** `afterSwapReturnDelta` charges only the unspecified currency; exact-output swaps cannot be charged in the output token. The exact-output row above is incorrect.
+- **AV-15 / AV-17** v4 core has no TWAP. Oracle failure at exit must not block removal.
+- **AV-18 / AV-19** ERC-6909 reserves are per currency; anyone can initialize a pool on the hook. Parameter and oracle source unspecified.
+
 ## Parameters and next steps
 
 Four numbers decide whether the economics close. None should be guessed; all come from replaying real pool history.

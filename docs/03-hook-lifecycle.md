@@ -1,30 +1,72 @@
 # Hook lifecycle
 
-Five callbacks are enabled, which takes six flag bits because `afterSwap` also returns a delta; everything else is off. The flags are declared in `src/BallastReserveHook.sol` and asserted in `test/BallastReserveHook.t.sol`. The swap curve is untouched (`vanillaSwap: true`), which keeps the hook eligible for Uniswap interface routing and simple to audit.
+Five callbacks are enabled. They take six flag bits because `afterSwap` also returns a delta. The flags are declared in `src/BallastReserveHook.sol` and asserted in `test/BallastReserveHook.t.sol`. The swap curve is not modified (`vanillaSwap: true`).
 
 ## Permission flags
 
-| Callback | Flag | What Ballast does |
+| Callback | Flag | Behaviour |
 | --- | --- | --- |
-| `afterInitialize` | on | Stores the pool's immutable parameters (k, c, H, m, oracle address). Rejects pools whose reference asset has no oracle unless a TWAP fallback is configured. |
-| `beforeSwap` | on | Records `sqrtPriceX96` before the swap in transient storage. |
-| `afterSwap` + `afterSwapReturnsDelta` | on | Reads the post-swap price, computes loss = Δy − Δx·P₁, returns a delta of k·loss in the output token, mints it as ERC-6909 to the pool's reserve. |
-| `afterAddLiquidity` | on | Records or updates the position's entry amounts and entry reference price. |
-| `beforeRemoveLiquidity` | on | Computes exit amounts and IL, applies the rules, burns ERC-6909 from the reserve and transfers the payout to the LP. Clears or scales the position record. |
+| `afterInitialize` | on | Store the pool's k, c, H, m and oracle. Reject pools with no oracle and no TWAP fallback. |
+| `beforeSwap` | on | Store the pre-swap `sqrtPriceX96` in transient storage. |
+| `afterSwap` + `afterSwapReturnsDelta` | on | Compute loss = Δy − Δx·P₁ from the actual deltas, return k·loss as a hook delta and mint it to the pool reserve. |
+| `afterAddLiquidity` | on | Create or update the position's entry record (x₀, y₀, Pₑ, entry time). |
+| `beforeRemoveLiquidity` | on | Compute IL, apply the payout rules, burn ERC-6909 from the reserve and pay the LP. Scale or clear the record. |
 
-Off: `beforeInitialize`, `beforeAddLiquidity`, `afterRemoveLiquidity`, both donate hooks, `beforeSwapReturnsDelta`, and both liquidity return-delta flags.
+Off: `beforeInitialize`, `beforeAddLiquidity`, `afterRemoveLiquidity`, both donate hooks, `beforeSwapReturnsDelta` and both liquidity return-delta flags.
 
 ## Custody
 
-The hook holds no funds outside the PoolManager. All reserve balances are ERC-6909 claims on the PoolManager, keyed per pool. Payout is a `take` from the PoolManager inside the unlock callback, so standard v4 locking applies.
+The hook holds no tokens directly. Reserve balances are ERC-6909 claims on the PoolManager, tracked per pool. Payouts are a burn plus `take` inside the PoolManager's unlock callback.
 
 ## Swap flow
 
-1. `beforeSwap`: store pre-swap `sqrtPriceX96` in transient storage.
-2. Swap executes on the unmodified curve.
-3. `afterSwap`: read post-swap price P₁ and the actual balance deltas Δx, Δy. Compute loss = Δy − Δx·P₁ from the deltas regardless of direction or exact-in/exact-out mode. Return k·loss as a hook delta in the output token and mint it as ERC-6909 to the pool reserve.
+```mermaid
+flowchart TD
+    A[Swap submitted] --> B["beforeSwap<br/>store sqrtPriceX96 in transient storage"]
+    B --> C["Swap executes on unmodified curve"]
+    C --> D["afterSwap<br/>read P₁ and balance deltas Δx, Δy"]
+    D --> E["loss = Δy − Δx · P₁"]
+    E --> F{loss > 0?}
+    F -- no --> G[Return zero delta]
+    F -- yes --> H["surcharge = k · loss"]
+    H --> I["Return hook delta"]
+    I --> J["Mint ERC-6909 to pool reserve"]
+    J --> K[Swap settles]
+    G --> K
+```
 
-## Liquidity flow
+The loss is computed from the actual deltas, so swap direction and exact-in or exact-out do not change the formula. The currency charged on exact-output swaps is tracked in [AV-13](07-attack-vectors.md#av-13-exact-output-swaps).
 
-1. `afterAddLiquidity`: read the amounts actually deposited and the reference price Pₑ. Create the position record, or fold the new amounts into the existing record as a liquidity-weighted average entry.
-2. `beforeRemoveLiquidity`: compute exit amounts x₁, y₁ for the liquidity being removed and read reference price Pₓ. Scale the recorded x₀, y₀ by the fraction withdrawn. Compute IL. If IL > 0, hold ≥ H and the reserve is non-empty, pay min(c·IL, m·share·reserve) from the reserve. Clear the record on full removal, otherwise keep the unscaled remainder.
+## Payout flow
+
+```mermaid
+flowchart TD
+    A[removeLiquidity called] --> B["beforeRemoveLiquidity"]
+    B --> C["Scale recorded x₀, y₀ by fraction withdrawn"]
+    C --> D["Read exit amounts x₁, y₁ and reference price Pₓ"]
+    D --> E["IL = (x₀·Pₓ + y₀) − (x₁·Pₓ + y₁)"]
+    E --> F{IL > 0?}
+    F -- no --> Z[No payout]
+    F -- yes --> G{"held ≥ H?"}
+    G -- no --> Z
+    G -- yes --> H{reserve > 0?}
+    H -- no --> Z
+    H -- yes --> I["cap = m · liquidityShare · reserve"]
+    I --> J["payout = min(c · IL, cap)"]
+    J --> K["Burn ERC-6909 from reserve<br/>take to LP inside unlock"]
+    K --> L[Update position record]
+    Z --> L
+    L --> M[Liquidity removal proceeds]
+```
+
+Every path ends with the removal going through.
+
+## Position record
+
+```mermaid
+flowchart LR
+    N[No record] -- "afterAddLiquidity<br/>store x₀, y₀, Pₑ, t₀" --> O[Open record]
+    O -- "afterAddLiquidity<br/>liquidity-weighted average entry" --> O
+    O -- "beforeRemoveLiquidity (partial)<br/>scale x₀, y₀; keep remainder" --> O
+    O -- "beforeRemoveLiquidity (full)<br/>clear" --> N
+```

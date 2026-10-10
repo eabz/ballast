@@ -2,26 +2,16 @@
 
 ## Trust model
 
-- No owner, no upgrade path, no pause. If a flaw is found, the remedy is a new hook and LP migration, not an admin key.
-- No admin withdrawal. The reserve belongs to the pool.
-- Parameters are immutable per pool after `afterInitialize`.
-- The hook never blocks liquidity removal. Worst case for an LP is a payout of zero.
-- The hook makes no external calls to the LP during payout and executes no swaps.
+- **No privileged roles.** No owner, upgrade path, pause or admin withdrawal. If a flaw is found, the fix is a new hook and an LP migration.
+- **Pool-owned reserve.** Surcharges belong to the pool that collected them and are only paid out to that pool's LPs.
+- **Immutable parameters.** k, c, H, m and the oracle are fixed in `afterInitialize`.
+- **Withdrawals always succeed.** The hook never makes liquidity removal revert. The worst case for an LP is a payout of zero.
+- **Minimal external surface.** Payout is a `take` from the PoolManager. The hook makes no calls to the LP and executes no swaps.
+
+Several of these properties are not yet guaranteed by the design. AV-03, AV-17, AV-18 and AV-19 cover the gaps.
 
 ## Attack surface
 
-| Attack | Defense |
-| --- | --- |
-| Deposit, move the price, withdraw and claim IL | Minimum hold H; long-window or external reference price; pro-rata draw cap. Moving a 30-minute TWAP on a liquid pair costs more than the capped claim. |
-| Wash-trade to look like a loser | IL is measured against the reference price, not against the LP's own trades. Wash trades pay the surcharge and move nothing that matters. |
-| Split one position into many to beat the pro-rata cap | The cap is per claim but the multiplier m bounds total draw; many small positions each hold for H and each pay gas. Monitor in backtest; raise H or lower m if it is profitable. |
-| Sandwich the reference price at the exact block of withdrawal | External oracle, or TWAP window ≫ one block. |
-| Reserve-token mismatch: reserve holds token A, claimant is owed value in token B | Payout is denominated in value (token1 units) and paid in whatever mix the reserve holds, at the reference price. No swap is executed by the hook. |
-| Drain via reentrancy during payout | Payout is a `take` from the PoolManager inside the unlock callback; standard v4 locking applies, no external calls to the LP. |
-| Router or aggregator exploits the surcharge formula with exact-output swaps | Exact-output swaps are handled by computing the loss term from the actual deltas regardless of direction; tested both ways. |
+All known attacks, the current defense against each, and the checks that close them are in [07-attack-vectors.md](07-attack-vectors.md).
 
-## Open questions to settle before audit
-
-- Oracle failure modes: stale Chainlink round, TWAP observation cardinality too low. The design says reject at init without an oracle or TWAP fallback; behaviour at withdrawal when the feed is stale is not yet specified.
-- Rounding direction for the surcharge and the payout. Both should round in favour of the reserve.
-- Whether position split across many salts can beat m in practice. To be measured in the backtest.
+Vectors marked `design-fix` need a change in `design-logic.md` before implementation: AV-02, AV-03, AV-05, AV-06, AV-12, AV-13, AV-15 and AV-19.
