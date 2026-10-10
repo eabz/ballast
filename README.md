@@ -1,0 +1,47 @@
+# Ballast
+
+Ballast is a Uniswap v4 hook for volatile pairs that pays liquidity providers back part of their impermanent loss.
+
+Swappers pay a small surcharge proportional to the loss their trade imposes on LPs. The surcharge accumulates in a pool-owned reserve held as ERC-6909 claims on the PoolManager. When an LP withdraws at a loss versus holding, the hook pays a capped, pro-rata share of that loss back from the reserve.
+
+The contract is named `BallastReserveHook` (an unrelated `BallastHook` already exists in the hook registry). The project name is Ballast.
+
+## Status
+
+Design stage. No Solidity yet. The next step is a backtest on Base ETH/USDC to fix the four economic parameters before any contract is written. See [docs/06-roadmap.md](docs/06-roadmap.md).
+
+## Documentation
+
+| Page | Contents |
+| --- | --- |
+| [docs/01-overview.md](docs/01-overview.md) | The loss being covered and why it cannot be charged back 1:1 |
+| [docs/02-mechanism.md](docs/02-mechanism.md) | Collection on swaps, payout on withdrawal, the four solvency rules |
+| [docs/03-hook-lifecycle.md](docs/03-hook-lifecycle.md) | Permission flags and what each callback does |
+| [docs/04-security.md](docs/04-security.md) | Trust model and attack surface |
+| [docs/05-parameters.md](docs/05-parameters.md) | k, c, H, m and the backtest that fixes them |
+| [docs/06-roadmap.md](docs/06-roadmap.md) | Ordered next steps |
+| [docs/diagrams.md](docs/diagrams.md) | Mermaid DAGs: lanes, swap flow, payout decision, position lifecycle, parameter and delivery dependencies |
+| [docs/glossary.md](docs/glossary.md) | Terms and symbols |
+| [docs/design-logic.md](docs/design-logic.md) | Original design document, kept verbatim as the canonical source |
+
+## Core formulas
+
+Per-swap surcharge, taken in the output token:
+
+```
+surcharge = k · (Δy − Δx · P₁),   0 < k < 1
+```
+
+Realized IL at withdrawal, in token1 units, fees excluded:
+
+```
+IL = (x₀ · Pₓ + y₀) − (x₁ · Pₓ + y₁)
+payout = min(c · IL, m · liquidityShare · reserve)   if IL > 0 and hold ≥ H
+```
+
+## Principles
+
+- The reserve is never a promise. Empty reserve means withdrawals succeed and pay nothing.
+- The hook never blocks liquidity removal.
+- No owner, no admin withdrawal, no upgrade path, no pause. Parameters are immutable per pool.
+- The swap curve is untouched. LP fees are untouched.
