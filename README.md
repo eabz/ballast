@@ -8,21 +8,21 @@ The contract is named `BallastReserveHook` (an unrelated `BallastHook` already e
 
 ## Status
 
-Design stage. No Solidity yet. The next step is a backtest on Base ETH/USDC to fix the four economic parameters before any contract is written. See [docs/06-roadmap.md](docs/06-roadmap.md).
+Design stage. No Solidity yet. The next step is a backtest on Base ETH/USDC to fix the four economic parameters before any contract is written. See [06-roadmap.md](docs/06-roadmap.md).
 
 ## Documentation
 
 | Page | Contents |
 | --- | --- |
-| [docs/01-overview.md](docs/01-overview.md) | The loss being covered and why it cannot be charged back 1:1 |
-| [docs/02-mechanism.md](docs/02-mechanism.md) | Collection on swaps, payout on withdrawal, the four solvency rules |
-| [docs/03-hook-lifecycle.md](docs/03-hook-lifecycle.md) | Permission flags and what each callback does |
-| [docs/04-security.md](docs/04-security.md) | Trust model and attack surface |
-| [docs/05-parameters.md](docs/05-parameters.md) | k, c, H, m and the backtest that fixes them |
-| [docs/06-roadmap.md](docs/06-roadmap.md) | Ordered next steps |
-| [docs/diagrams.md](docs/diagrams.md) | Mermaid DAGs: lanes, swap flow, payout decision, position lifecycle, parameter and delivery dependencies |
-| [docs/glossary.md](docs/glossary.md) | Terms and symbols |
-| [docs/design-logic.md](docs/design-logic.md) | Original design document, kept verbatim as the canonical source |
+| [01-overview.md](docs/01-overview.md) | The loss being covered and why it cannot be charged back 1:1 |
+| [02-mechanism.md](docs/02-mechanism.md) | Collection on swaps, payout on withdrawal, the four solvency rules |
+| [03-hook-lifecycle.md](docs/03-hook-lifecycle.md) | Permission flags and what each callback does |
+| [04-security.md](docs/04-security.md) | Trust model and attack surface |
+| [05-parameters.md](docs/05-parameters.md) | k, c, H, m and the backtest that fixes them |
+| [06-roadmap.md](docs/06-roadmap.md) | Ordered next steps |
+| [diagrams.md](docs/diagrams.md) | Mermaid DAGs: lanes, swap flow, payout decision, position lifecycle, parameter and delivery dependencies |
+| [glossary.md](docs/glossary.md) | Terms and symbols |
+| [design-logic.md](docs/design-logic.md) | Original design document, kept verbatim as the canonical source |
 
 ## Core formulas
 
