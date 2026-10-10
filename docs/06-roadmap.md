@@ -2,9 +2,10 @@
 
 Ordered. Each step gates the next.
 
-- [ ] **Documentation layer** — this folder. Keep `design-logic.md` as the canonical source.
+- [x] **Documentation layer** — this folder. Keep `design-logic.md` as the canonical source.
 - [ ] **Backtest** on Base ETH/USDC with the indexer; pick k, c, H, m. See [Parameters](05-parameters.md).
-- [ ] **Scaffold** `BallastReserveHook` from v4-template; mine the hook address for the five flags.
+- [x] **Scaffold** `BallastReserveHook` from v4-template with the six flag bits, pass-through callbacks, and a deploy script that mines the address.
+- [ ] **Implement** the callbacks once k, c, H, m are fixed. Each TODO in `src/BallastReserveHook.sol` maps to a row in [Hook lifecycle](03-hook-lifecycle.md).
 - [ ] **Unit tests**: surcharge in both swap directions and both exact-in/exact-out; IL math on partial removals; reserve-empty path.
 - [ ] **Fork test** against the live Base pool with replayed swaps.
 - [ ] **Testnet deploy** (Unichain Sepolia), then registry submission and the Uniswap routing allowlist form.

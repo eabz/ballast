@@ -8,7 +8,7 @@ The contract is named `BallastReserveHook` (an unrelated `BallastHook` already e
 
 ## Status
 
-Design stage. No Solidity yet. The next step is a backtest on Base ETH/USDC to fix the four economic parameters before any contract is written. See [06-roadmap.md](docs/06-roadmap.md).
+Scaffolded. The Foundry project builds and the hook compiles with the correct permission flags, but every callback is a pass-through. The next step is a backtest on Base ETH/USDC to fix the four economic parameters before the callbacks are implemented. See [06-roadmap.md](docs/06-roadmap.md).
 
 ## Documentation
 
@@ -23,6 +23,30 @@ Design stage. No Solidity yet. The next step is a backtest on Base ETH/USDC to f
 | [diagrams.md](docs/diagrams.md) | Mermaid DAGs: lanes, swap flow, payout decision, position lifecycle, parameter and delivery dependencies |
 | [glossary.md](docs/glossary.md) | Terms and symbols |
 | [design-logic.md](docs/design-logic.md) | Original design document, kept verbatim as the canonical source |
+
+## Development
+
+Foundry project scaffolded from [v4-template](https://github.com/uniswapfoundation/v4-template). Dependencies are git submodules pinned in `foundry.lock`.
+
+```bash
+git clone --recurse-submodules <repo-url> && cd ballast
+```
+
+```bash
+forge build
+```
+
+```bash
+forge test
+```
+
+| Path | Contents |
+| --- | --- |
+| `src/BallastReserveHook.sol` | The hook. Permission flags are final; callback bodies are TODO. |
+| `test/BallastReserveHook.t.sol` | Flag assertions, swap pass-through, and the never-block-removal invariant. |
+| `script/00_DeployHook.s.sol` | Mines a CREATE2 salt for the flag bits and deploys. |
+| `script/01..03_*.s.sol` | Create pool, add liquidity, swap. From the template. |
+| `test/utils/` | Deployers, BaseTest and EasyPosm helpers. From the template. |
 
 ## Core formulas
 

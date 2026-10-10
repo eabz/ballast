@@ -1,6 +1,6 @@
 # Hook lifecycle
 
-Five permission bits are set; everything else is off. The swap curve is untouched (`vanillaSwap: true`), which keeps the hook eligible for Uniswap interface routing and simple to audit.
+Five callbacks are enabled, which takes six flag bits because `afterSwap` also returns a delta; everything else is off. The flags are declared in `src/BallastReserveHook.sol` and asserted in `test/BallastReserveHook.t.sol`. The swap curve is untouched (`vanillaSwap: true`), which keeps the hook eligible for Uniswap interface routing and simple to audit.
 
 ## Permission flags
 

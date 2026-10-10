@@ -4,7 +4,14 @@ Ballast is a Uniswap v4 hook (`BallastReserveHook`) that collects a per-swap sur
 
 ## Current phase
 
-Documentation and design only. Do not scaffold Solidity until the backtest in `docs/05-parameters.md` has fixed k, c, H and m.
+Scaffolded, not implemented. `src/BallastReserveHook.sol` has the final permission flags and pass-through callbacks with a TODO per callback. Do not implement the economics until the backtest in `docs/05-parameters.md` has fixed k, c, H and m.
+
+## Commands
+
+- `forge build` and `forge test` from the repo root. Run `forge fmt` before committing.
+- Dependencies are submodules pinned in `foundry.lock`; use `forge install` rather than editing `lib/` by hand.
+- Imports use the `@uniswap/v4-core/`, `@uniswap/v4-periphery/` and `@openzeppelin/uniswap-hooks/` remappings. `SwapParams` and `ModifyLiquidityParams` come from `types/PoolOperation.sol`, not `IPoolManager`.
+- Tests deploy the hook with `deployCodeTo` at an address carrying the six flag bits; see the `FLAGS` constant in the test.
 
 ## Source of truth
 
