@@ -20,8 +20,8 @@ import os
 import numpy as np
 import pandas as pd
 
-DEC0, DEC1 = 1e18, 1e6
 Q96 = 2.0**96
+DEC0, DEC1 = 1e18, 1e6  # overwritten from initialize.json in main()
 HOUR = 3600
 
 
@@ -42,10 +42,12 @@ def amounts_for_liquidity(L, sp, ta, tb):
 
 
 def load(root):
+    global DEC0, DEC1
     swaps = pd.read_parquet(os.path.join(root, "swaps.parquet"))
     mods = pd.read_parquet(os.path.join(root, "mods.parquet"))
     blocks = pd.read_parquet(os.path.join(root, "blocks.parquet"))
     init = json.load(open(os.path.join(root, "initialize.json")))
+    DEC0, DEC1 = 10.0 ** init.get("decimals0", 18), 10.0 ** init.get("decimals1", 6)
     for c in ("amount0", "amount1", "sqrt_price_x96", "liquidity"):
         swaps[c] = swaps[c].map(float)
     mods["liquidity_delta"] = mods["liquidity_delta"].map(float)
@@ -55,7 +57,8 @@ def load(root):
     return swaps, mods, init
 
 
-def swap_metrics(swaps):
+def swap_metrics(swaps, numeraire="token1"):
+    """All loss/notional columns are in token1 units; `cv` converts them to the chosen numeraire."""
     s = swaps
     sp = s["sqrt_price_x96"].values / Q96
     p1 = sp**2 * DEC0 / DEC1  # USDC per ETH after the swap
@@ -67,8 +70,19 @@ def swap_metrics(swaps):
     loss_net = a0 * p1 + a1
     loss_gross = loss_net + fee_val
     notional = np.where(zero_for_one, -a0 * p1, -a1)
+    # A swap that empties the active range leaves the price at a tick boundary; P1 is meaningless there.
+    # The hook must bound the surcharge by the swap's own output; here those swaps are excluded.
+    drained = s["liquidity"].values == 0
+    if drained.any():
+        print(f"excluding {drained.sum()} swaps that drained the pool to zero liquidity")
+        loss_net = np.where(drained, 0.0, loss_net)
+        loss_gross = np.where(drained, 0.0, loss_gross)
+        fee_val = np.where(drained, 0.0, fee_val)
+        notional = np.where(drained, 0.0, notional)
+    cv = 1.0 / p1 if numeraire == "token0" else np.ones_like(p1)
     return pd.DataFrame(
         {
+            "cv": cv,
             "t": s["t"].values,
             "block": s["block"].values,
             "p1": p1,
@@ -108,11 +122,14 @@ class Twap:
         return 1.0001**avg_tick * DEC0 / DEC1
 
 
-def prepare_mods(sm, mods, twap):
+def prepare_mods(sm, mods, twap, numeraire="token1"):
     """Per liquidity event: index of the last swap at or before it, and the reference price."""
     mods = mods[mods["liquidity_delta"] != 0].copy()
     mods["i"] = np.searchsorted(sm["t"].values, mods["t"].values, side="right") - 1
     mods["px"] = [twap.price(t) for t in mods["t"].values]
+    p1 = sm["p1"].values
+    spot = np.where(mods["i"].values >= 0, p1[np.maximum(mods["i"].values, 0)], np.nan)
+    mods["cvm"] = 1.0 / spot if numeraire == "token0" else 1.0
     return mods
 
 
@@ -123,7 +140,7 @@ def simulate(sm, mods, init, k, c, H, m, loss_col, twap=None):
     in1 = np.where(sm["zero_for_one"].values, surcharge, 0.0)  # output token USDC
     in0 = np.where(sm["zero_for_one"].values, 0.0, surcharge / sm["p1"].values)  # output token ETH
     cum0, cum1 = np.cumsum(in0), np.cumsum(in1)
-    st = sm["t"].values
+    cv = sm["cv"].values
     sqrt_raw = sm["sqrt_raw"].values
     active = sm["active_liquidity"].values
     p1 = sm["p1"].values
@@ -180,24 +197,25 @@ def simulate(sm, mods, init, k, c, H, m, loss_col, twap=None):
         if pos["L"] <= 0:
             del positions[key]
 
+        u = r.cvm
         rows.append(
             {
                 "t": r.t,
-                "il": il,
-                "hold_value": hold_value,
+                "il": il * u,
+                "hold_value": hold_value * u,
                 "hold_h": hold / HOUR,
                 "share": share,
-                "reserve_before": reserve,
-                "claim": claim,
-                "cap": cap,
-                "payout": payout,
+                "reserve_before": reserve * u,
+                "claim": claim * u,
+                "cap": cap * u,
+                "payout": payout * u,
                 "eligible": eligible,
             }
         )
 
     closes = pd.DataFrame(rows)
-    final_res = (cum0[-1] - out0) * p1[-1] + (cum1[-1] - out1)
-    total_in = float(np.sum(surcharge))
+    final_res = ((cum0[-1] - out0) * p1[-1] + (cum1[-1] - out1)) * cv[-1]
+    total_in = float(np.sum(surcharge * cv))
     losing = closes[closes["il"] > 0] if len(closes) else closes
     elig = closes[closes["eligible"]] if len(closes) else closes
     summary = {
@@ -221,42 +239,47 @@ def simulate(sm, mods, init, k, c, H, m, loss_col, twap=None):
 def splitting_analysis(sm, swaps, k):
     """AV-12. How much of the per-swap surcharge survives if the loss is measured per unlock (tx) or per
     block instead of per swap, and what rational splitting of large swaps into N pieces would do."""
-    a0 = swaps["amount0"].values / DEC0
-    a1 = swaps["amount1"].values / DEC1
+    live = sm["notional"].values > 0  # rows zeroed by --skip-days drop out here too
+    a0 = np.where(live, swaps["amount0"].values / DEC0, 0.0)
+    a1 = np.where(live, swaps["amount1"].values / DEC1, 0.0)
     df = pd.DataFrame({"tx": swaps["tx"].values, "block": sm["block"].values, "a0": a0, "a1": a1,
                        "p1": sm["p1"].values, "fee_val": sm["fee_val"].values, "notional": sm["notional"].values})
-    base_net = k * np.maximum(sm["loss_net"].values, 0).sum()
-    base_gross = k * np.maximum(sm["loss_gross"].values, 0).sum()
+    cv = sm["cv"].values
+    df["cv"] = cv
+    base_net = k * (np.maximum(sm["loss_net"].values, 0) * cv).sum()
+    base_gross = k * (np.maximum(sm["loss_gross"].values, 0) * cv).sum()
     rows = []
     for name, keys in (("per swap", None), ("per tx (unlock)", ["tx"]), ("per block", ["block"])):
         if keys is None:
             rows.append({"measure": name, "surcharge_net": base_net, "surcharge_gross": base_gross, "groups": len(df)})
             continue
-        g = df.groupby(keys, sort=False).agg(a0=("a0", "sum"), a1=("a1", "sum"), p1=("p1", "last"), fee=("fee_val", "sum"))
+        g = df.groupby(keys, sort=False).agg(a0=("a0", "sum"), a1=("a1", "sum"), p1=("p1", "last"), fee=("fee_val", "sum"), cv=("cv", "last"))
         net = g["a0"] * g["p1"] + g["a1"]
-        rows.append({"measure": name, "surcharge_net": k * np.maximum(net, 0).sum(),
-                     "surcharge_gross": k * np.maximum(net + g["fee"], 0).sum(), "groups": len(g)})
+        rows.append({"measure": name, "surcharge_net": k * (np.maximum(net, 0) * g["cv"]).sum(),
+                     "surcharge_gross": k * (np.maximum(net + g["fee"], 0) * g["cv"]).sum(), "groups": len(g)})
     agg = pd.DataFrame(rows)
     agg["share_of_per_swap_net"] = agg["surcharge_net"] / base_net
     agg["share_of_per_swap_gross"] = agg["surcharge_gross"] / base_gross
 
     # Rational splitting: loss ~ size^2 for small moves, so N equal pieces pay ~1/N. Apply to swaps above a notional threshold.
-    lg = np.maximum(sm["loss_gross"].values, 0)
-    n = sm["notional"].values
+    lg = np.maximum(sm["loss_gross"].values, 0) * cv
+    n = sm["notional"].values * cv
     srows = []
-    for thr in (10_000, 100_000):
+    live = n > 0
+    for q in (0.9, 0.99):
+        thr = np.quantile(n[live], q)
         big = n >= thr
         for N in (2, 5, 10):
             kept = lg[~big].sum() + lg[big].sum() / N
-            srows.append({"split_threshold_usd": thr, "N": N, "share_of_swaps_split": big.mean(),
+            srows.append({"split_quantile": q, "threshold": thr, "N": N, "share_of_swaps_split": big.mean(),
                           "reserve_share_remaining": kept / lg.sum()})
     return agg, pd.DataFrame(srows)
 
 
 def surcharge_stats(sm, k, loss_col):
     loss = np.maximum(sm[loss_col].values, 0)
-    s = k * loss
-    n = sm["notional"].values
+    s = k * loss * sm["cv"].values
+    n = sm["notional"].values * sm["cv"].values
     ok = n > 0
     s, n = s[ok], n[ok]
     bps = s / n * 1e4
@@ -275,6 +298,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--chain", default="mainnet")
     ap.add_argument("--fee", type=int, default=500)
+    ap.add_argument("--name", default=None, help="data directory name (defaults to the fee tier)")
+    ap.add_argument("--numeraire", default="token1", choices=("token0", "token1"), help="unit for all reported values")
+    ap.add_argument("--unit", default=None, help="label for the numeraire, e.g. USDC or ETH")
     ap.add_argument("--k", default="0.1,0.2,0.3")
     ap.add_argument("--c", default="0.3,0.5")
     ap.add_argument("--H", default="24,72", help="hours")
@@ -284,11 +310,13 @@ def main():
     ap.add_argument("--out", default=None, help="directory for csv outputs")
     args = ap.parse_args()
 
-    root = os.path.join(os.path.dirname(__file__), "..", "data", args.chain, str(args.fee))
+    root = os.path.join(os.path.dirname(__file__), "..", "data", args.chain, args.name or str(args.fee))
     swaps, mods, init = load(root)
-    sm = swap_metrics(swaps)
+    sm = swap_metrics(swaps, args.numeraire)
     twap = Twap(sm["t"].values, sm["tick"].values, mods["t"].min() - 1, init["tick"], args.twap_min * 60)
-    mods = prepare_mods(sm, mods, twap)
+    mods = prepare_mods(sm, mods, twap, args.numeraire)
+    U = args.unit or ("USDC" if args.numeraire == "token1" else "ETH")
+    cv = sm["cv"].values
     if args.skip_days:
         cutoff = sm["t"].min() + args.skip_days * 86400
         # Zero the surcharge stream before the cutoff but keep the price path and positions opened before it.
@@ -298,11 +326,13 @@ def main():
         print(f"skipping surcharges and closes before {pd.to_datetime(cutoff, unit='s'):%Y-%m-%d}")
 
     days = (sm["t"].max() - sm["t"].min()) / 86400
-    vol = sm["notional"].sum()
+    vol = (sm["notional"] * cv).sum()
+    M = 1e6 if args.numeraire == "token1" else 1.0
+    Ms = "M" if args.numeraire == "token1" else ""
     print(f"period: {pd.to_datetime(sm['t'].min(), unit='s'):%Y-%m-%d} to {pd.to_datetime(sm['t'].max(), unit='s'):%Y-%m-%d} ({days:.0f} days)")
-    print(f"swaps: {len(sm):,}  volume: ${vol / 1e6:,.1f}M  liquidity events: {len(mods):,}")
-    print(f"LP fees: ${sm['fee_val'].sum() / 1e6:,.2f}M  LVR gross: ${np.maximum(sm['loss_gross'], 0).sum() / 1e6:,.2f}M  "
-          f"net-of-fee loss: ${np.maximum(sm['loss_net'], 0).sum() / 1e6:,.2f}M  share of swaps with net loss>0: {(sm['loss_net'] > 0).mean():.1%}")
+    print(f"swaps: {len(sm):,}  volume: {vol / M:,.1f}{Ms} {U}  liquidity events: {len(mods):,}")
+    print(f"LP fees: {(sm['fee_val'] * cv).sum() / M:,.2f}{Ms} {U}  LVR gross: {(np.maximum(sm['loss_gross'], 0) * cv).sum() / M:,.2f}{Ms} {U}  "
+          f"net-of-fee loss: {(np.maximum(sm['loss_net'], 0) * cv).sum() / M:,.2f}{Ms} {U}  share of swaps with net loss>0: {(sm['loss_net'] > 0).mean():.1%}")
 
     ks = [float(x) for x in args.k.split(",")]
     cs = [float(x) for x in args.c.split(",")]
@@ -334,18 +364,18 @@ def main():
     if all_closes is not None and len(all_closes):
         c = all_closes
         print("\n== Position closes (independent of scenario) ==")
-        print(f"closes: {len(c):,}  with IL>0: {(c['il'] > 0).mean():.1%}  total IL on losers: ${c.loc[c['il'] > 0, 'il'].sum() / 1e6:,.2f}M")
+        print(f"closes: {len(c):,}  with IL>0: {(c['il'] > 0).mean():.1%}  total IL on losers: {c.loc[c['il'] > 0, 'il'].sum() / M:,.2f}{Ms} {U}")
         print(f"IL as share of hold value, losers: median {np.median(c.loc[c['il'] > 0, 'il'] / c.loc[c['il'] > 0, 'hold_value']) * 1e4:,.0f} bps")
         print(f"hold time: median {c['hold_h'].median():.1f}h  share < 24h {(c['hold_h'] < 24).mean():.1%}  share < 72h {(c['hold_h'] < 72).mean():.1%}")
 
     if all_closes is not None and len(all_closes):
         print("\n== Monthly, first scenario (k=%s c=%s H=%sh m=%s, %s) ==" % (ks[0], cs[0], Hs[0] / HOUR, ms[0], "loss_gross"))
         k0 = ks[0]
-        inflow = pd.Series(k0 * np.maximum(sm["loss_gross"].values, 0), index=pd.to_datetime(sm["t"], unit="s")).resample("MS").sum()
-        volm = pd.Series(sm["notional"].values, index=pd.to_datetime(sm["t"], unit="s")).resample("MS").sum()
+        inflow = pd.Series(k0 * np.maximum(sm["loss_gross"].values, 0) * cv, index=pd.to_datetime(sm["t"], unit="s")).resample("MS").sum()
+        volm = pd.Series(sm["notional"].values * cv, index=pd.to_datetime(sm["t"], unit="s")).resample("MS").sum()
         cl = all_closes.set_index(pd.to_datetime(all_closes["t"], unit="s"))
         monthly = pd.DataFrame({
-            "volume_musd": volm / 1e6,
+            "volume": volm / M,
             "inflow_usdc": inflow,
             "claims_usdc": cl.loc[cl["eligible"], "claim"].resample("MS").sum(),
             "payouts_usdc": cl["payout"].resample("MS").sum(),

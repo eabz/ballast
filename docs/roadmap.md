@@ -11,9 +11,9 @@ The Foundry project builds and the hook compiles with its final permission flags
 Steps are in order; each one gates the next.
 
 - [x] **Documentation.** `design-logic.md` is the canonical source.
-- [x] **Scaffold.** `BallastReserveHook` from v4-template, with the six flag bits, pass-through callbacks and an address-mining deploy script.
+- [x] **Scaffold.** `BallastReserveHook` from v4-template, with the permission flags (now seven bits), pass-through callbacks and an address-mining deploy script.
 - [ ] **Backtest** on Base ETH/USDC to fix k, c, H and m. See [Backtest plan](#backtest-plan).
-- [ ] **Resolve design findings.** Settle every `design-fix` vector in [Attack vectors](06-attack-vectors.md) in `design-logic.md`, then update the affected pages. Currently AV-02, AV-03, AV-05, AV-06, AV-12, AV-13, AV-15 and AV-19.
+- [ ] **Resolve design findings.** Settle every `design-fix` vector in [Attack vectors](06-attack-vectors.md) in `design-logic.md`, then update the affected pages. Done for AV-01, 02, 03, 05, 06, 08, 10, 13, 17, 18, 19, 23 (status `designed`). Remaining: AV-12 and AV-28 (per-block loss), and the AV-15 oracle settings, which need backtest data.
 - [ ] **Implement** the callbacks. Each TODO in `src/BallastReserveHook.sol` maps to a row in [Hook lifecycle](03-hook-lifecycle.md).
 - [ ] **Unit tests.** Both swap directions, exact-in and exact-out, partial removals, empty reserve, and one test per open attack vector.
 - [ ] **Fork test** against the live Base pool with replayed swaps.
@@ -21,7 +21,7 @@ Steps are in order; each one gates the next.
 
 ```mermaid
 flowchart LR
-    D[Documentation] --> S["Scaffold<br/>six flag bits"]
+    D[Documentation] --> S["Scaffold<br/>permission flags"]
     S --> B["Backtest<br/>Base ETH/USDC"]
     B --> P["Fix k, c, H, m"]
     P --> AV["Resolve design-fix<br/>attack vectors"]
@@ -50,8 +50,13 @@ Report:
 - Surcharge in bps of volume, on median trades and in aggregate.
 - Whether splitting a position across salts beats the pro-rata cap ([AV-07](06-attack-vectors.md#av-07-splitting-across-salts)).
 - Reserve accrual when arbitrageurs split swaps ([AV-12](06-attack-vectors.md#av-12-swap-splitting)).
+- Loss measured per swap vs per block, and the surcharge in bps under each ([AV-28](06-attack-vectors.md#av-28-per-swap-loss-over-counts-in-block-round-trips)).
+- Per-block ratchet candidate for AV-12/AV-28: surcharge bps and reserve accrual vs per-swap.
+- TWAP cardinality, window, deviation bound and minimum depth ([AV-15](06-attack-vectors.md#av-15-twap-fallback)).
 - Payout distribution under adversarial claim ordering ([AV-25](06-attack-vectors.md#av-25-front-running-exits)).
 
 ### Success criterion
+
+Pending. Aggregate coverage is bounded near k (see [design-logic.md](design-logic.md)), so the target below will be restated once a multi-month backtest is in. Current wording:
 
 The economics work if some k keeps the surcharge under about 2 bps of volume on median trades and still funds payouts at c ≥ 0.3 ([AV-26](06-attack-vectors.md#av-26-unroutable-pool)).

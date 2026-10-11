@@ -13,11 +13,15 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
+import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 
 import {EasyPosm} from "./utils/libraries/EasyPosm.sol";
 import {BaseTest} from "./utils/BaseTest.sol";
 
-import {BallastReserveHook} from "../src/BallastReserveHook.sol";
+import {BaseHook} from "@openzeppelin/uniswap-hooks/src/base/BaseHook.sol";
+import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+
+import {BallastReserveHook, K_LIGHT, K_STANDARD, K_HEAVY} from "../src/BallastReserveHook.sol";
 
 contract BallastReserveHookTest is BaseTest {
     using EasyPosm for IPositionManager;
@@ -25,10 +29,11 @@ contract BallastReserveHookTest is BaseTest {
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
-    /// @dev The six flag bits the hook address must encode.
+    /// @dev The seven flag bits the hook address must encode.
     uint160 constant FLAGS = uint160(
-        Hooks.AFTER_INITIALIZE_FLAG | Hooks.AFTER_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+        Hooks.AFTER_INITIALIZE_FLAG | Hooks.AFTER_ADD_LIQUIDITY_FLAG | Hooks.AFTER_REMOVE_LIQUIDITY_FLAG
             | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG
+            | Hooks.AFTER_REMOVE_LIQUIDITY_RETURNS_DELTA_FLAG
     );
 
     Currency currency0;
@@ -50,7 +55,8 @@ contract BallastReserveHookTest is BaseTest {
 
         // Deploy the hook to an address with the correct flags, namespaced to avoid collisions.
         address flags = address(FLAGS ^ (0x4444 << 144));
-        bytes memory constructorArgs = abi.encode(poolManager);
+        bytes memory constructorArgs =
+            abi.encode(poolManager, currency0, currency1, uint24(3000), int24(60), K_STANDARD);
         deployCodeTo("BallastReserveHook.sol:BallastReserveHook", constructorArgs, flags);
         hook = BallastReserveHook(flags);
 
@@ -87,21 +93,98 @@ contract BallastReserveHookTest is BaseTest {
         Hooks.Permissions memory p = hook.getHookPermissions();
         assertTrue(p.afterInitialize);
         assertTrue(p.afterAddLiquidity);
-        assertTrue(p.beforeRemoveLiquidity);
+        assertTrue(p.afterRemoveLiquidity);
         assertTrue(p.beforeSwap);
         assertTrue(p.afterSwap);
         assertTrue(p.afterSwapReturnDelta);
+        assertTrue(p.afterRemoveLiquidityReturnDelta);
 
         assertFalse(p.beforeInitialize);
         assertFalse(p.beforeAddLiquidity);
-        assertFalse(p.afterRemoveLiquidity);
+        assertFalse(p.beforeRemoveLiquidity);
         assertFalse(p.beforeDonate);
         assertFalse(p.afterDonate);
         assertFalse(p.beforeSwapReturnDelta);
         assertFalse(p.afterAddLiquidityReturnDelta);
-        assertFalse(p.afterRemoveLiquidityReturnDelta);
 
         assertEq(uint160(address(hook)) & Hooks.ALL_HOOK_MASK, FLAGS);
+    }
+
+    /// @dev Parameters are fixed per deployment: the chosen tier plus the backtested constants.
+    function test_tierAndConstants() public view {
+        assertEq(hook.k(), 500_000);
+        assertEq(hook.COVERAGE_CAP(), 500_000);
+        assertEq(hook.MIN_HOLD(), 24 hours);
+        assertEq(hook.PRORATA_MULTIPLIER(), 3);
+        assertEq(K_LIGHT, 300_000);
+        assertEq(K_HEAVY, 700_000);
+    }
+
+    /// @dev AV-19: k outside the three tiers cannot be deployed.
+    function test_invalidTierReverts() public {
+        address other = address(FLAGS ^ (0x5555 << 144));
+        bytes memory badArgs = abi.encode(poolManager, currency0, currency1, uint24(3000), int24(60), uint24(400_000));
+        vm.etch(other, abi.encodePacked(vm.getCode("BallastReserveHook.sol:BallastReserveHook"), badArgs));
+        (bool ok, bytes memory ret) = other.call("");
+        assertFalse(ok);
+        assertEq(bytes4(ret), BallastReserveHook.InvalidTier.selector);
+    }
+
+    /// @dev AV-19: a pool with any other fee or tick spacing cannot be initialized on the hook.
+    function test_AV19_otherPoolKeyReverts() public {
+        PoolKey memory otherFee = PoolKey(currency0, currency1, 500, 60, IHooks(hook));
+        _expectPoolNotAllowed();
+        poolManager.initialize(otherFee, Constants.SQRT_PRICE_1_1);
+
+        PoolKey memory otherSpacing = PoolKey(currency0, currency1, 3000, 10, IHooks(hook));
+        _expectPoolNotAllowed();
+        poolManager.initialize(otherSpacing, Constants.SQRT_PRICE_1_1);
+    }
+
+    /// @dev AV-18: a second pool sharing a currency with the reserve cannot be created on the hook.
+    function test_AV18_secondPoolSharingCurrencyReverts() public {
+        (Currency fresh,) = deployCurrencyPair();
+        (Currency c0, Currency c1) = currency0 < fresh ? (currency0, fresh) : (fresh, currency0);
+
+        PoolKey memory otherPool = PoolKey(c0, c1, 3000, 60, IHooks(hook));
+        _expectPoolNotAllowed();
+        poolManager.initialize(otherPool, Constants.SQRT_PRICE_1_1);
+    }
+
+    /// @dev AV-24: every hook entrypoint rejects callers other than the PoolManager.
+    function test_AV24_callbacksOnlyPoolManager() public {
+        SwapParams memory swapParams = SwapParams(true, -1e18, TickMath.MIN_SQRT_PRICE + 1);
+        ModifyLiquidityParams memory addParams = ModifyLiquidityParams(tickLower, tickUpper, 1e18, 0);
+        ModifyLiquidityParams memory removeParams = ModifyLiquidityParams(tickLower, tickUpper, -1e18, 0);
+        BalanceDelta zero = BalanceDelta.wrap(0);
+
+        vm.expectRevert(BaseHook.NotPoolManager.selector);
+        hook.afterInitialize(address(this), poolKey, Constants.SQRT_PRICE_1_1, 0);
+
+        vm.expectRevert(BaseHook.NotPoolManager.selector);
+        hook.beforeSwap(address(this), poolKey, swapParams, Constants.ZERO_BYTES);
+
+        vm.expectRevert(BaseHook.NotPoolManager.selector);
+        hook.afterSwap(address(this), poolKey, swapParams, zero, Constants.ZERO_BYTES);
+
+        vm.expectRevert(BaseHook.NotPoolManager.selector);
+        hook.afterAddLiquidity(address(this), poolKey, addParams, zero, zero, Constants.ZERO_BYTES);
+
+        vm.expectRevert(BaseHook.NotPoolManager.selector);
+        hook.afterRemoveLiquidity(address(this), poolKey, removeParams, zero, zero, Constants.ZERO_BYTES);
+    }
+
+    /// @dev The PoolManager wraps hook reverts; match the hook's PoolNotAllowed inside the wrapper.
+    function _expectPoolNotAllowed() internal {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.afterInitialize.selector,
+                abi.encodeWithSelector(BallastReserveHook.PoolNotAllowed.selector),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
     }
 
     function test_swapPassesThroughScaffold() public {

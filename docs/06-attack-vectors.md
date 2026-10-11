@@ -9,36 +9,37 @@ Severity:
 - **Medium**: profitable under some parameters, or a revert path.
 - **Low**: griefing or degraded routing.
 
-Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector is closed when a test reproduces the attack and passes against the mitigation, or when it is `accepted` with a stated reason.
+Status: `open` (no decision yet), `design-fix` (needs a design decision), `designed` (resolved in `design-logic.md`, test pending), `test-written`, `mitigated`, `accepted`. A vector is closed when a test reproduces the attack and passes against the mitigation, or when it is `accepted` with a stated reason.
 
 ## Summary
 
 | ID | Vector | Area | Severity | Status |
 | --- | --- | --- | --- | --- |
-| AV-01 | Zero-delta `modifyLiquidity` triggers a claim | Payout | Critical | open |
-| AV-02 | Spot vs Pₓ mismatch at exit or entry | Payout | Critical | design-fix |
-| AV-03 | Payout recipient is the router or PositionManager | Payout | Critical | design-fix |
+| AV-01 | Zero-delta `modifyLiquidity` triggers a claim | Payout | Critical | designed |
+| AV-02 | Spot vs Pₓ mismatch at exit or entry | Payout | Critical | designed |
+| AV-03 | Payout recipient is the router or PositionManager | Payout | Critical | designed |
 | AV-04 | Deposit, move the reference price, withdraw and claim | Payout | High | open |
-| AV-05 | Hold timer bypass by topping up an aged position | Payout | High | design-fix |
-| AV-06 | Pro-rata share measured in liquidity units | Payout | High | design-fix |
-| AV-07 | Splitting a position across salts | Payout | Medium | open |
-| AV-08 | Partial-removal rounding and record drift | Payout | Medium | open |
+| AV-05 | Hold timer bypass by topping up an aged position | Payout | High | designed |
+| AV-06 | Pro-rata share measured in liquidity units | Payout | High | designed |
+| AV-07 | Splitting a position across salts | Payout | Medium | accepted |
+| AV-08 | Partial-removal rounding and record drift | Payout | Medium | designed |
 | AV-09 | Narrow range at a TWAP push target | Payout | Medium | open |
-| AV-10 | Payout token mix against a skewed Pₓ | Payout | Medium | open |
+| AV-10 | Payout token mix against a skewed Pₓ | Payout | Medium | designed |
 | AV-11 | Wash trading to appear as a losing LP | Payout | Low | open |
 | AV-12 | Surcharge evasion by splitting swaps | Collection | High | design-fix |
-| AV-13 | Exact-output swaps and the charged currency | Collection | High | design-fix |
+| AV-13 | Exact-output swaps and the charged currency | Collection | High | designed |
 | AV-14 | Surcharge arithmetic | Collection | Medium | open |
-| AV-15 | TWAP fallback not provided by v4 core | Oracle | High | design-fix |
+| AV-28 | Per-swap loss over-counts in-block round trips | Collection | High | design-fix |
+| AV-15 | TWAP fallback not provided by v4 core | Oracle | High | open |
 | AV-16 | Same-block manipulation of the reference price | Oracle | High | open |
-| AV-17 | Oracle failure blocks withdrawals | Oracle | High | open |
-| AV-18 | Cross-pool drain through shared ERC-6909 balances | Accounting | Critical | open |
-| AV-19 | Per-pool parameters set by the initializer | Accounting | Critical | design-fix |
+| AV-17 | Oracle failure blocks withdrawals | Oracle | High | designed |
+| AV-18 | Cross-pool drain through shared ERC-6909 balances | Accounting | Critical | mitigated |
+| AV-19 | Per-pool parameters set by the initializer | Accounting | Critical | mitigated |
 | AV-20 | Reentrancy during payout | Accounting | Medium | open |
 | AV-21 | Unsettled hook delta | Accounting | Medium | open |
 | AV-22 | Native ETH paths | Accounting | Medium | open |
-| AV-23 | Fee-on-transfer and rebasing tokens | Accounting | Medium | open |
-| AV-24 | Callbacks reachable outside the PoolManager | Access | Medium | open |
+| AV-23 | Fee-on-transfer and rebasing tokens | Accounting | Medium | designed |
+| AV-24 | Callbacks reachable outside the PoolManager | Access | Medium | mitigated |
 | AV-25 | Front-running large exits | Economic | Low | open |
 | AV-26 | Pool unroutable against an unhooked pool | Economic | Low | open |
 | AV-27 | JIT liquidity and the pro-rata denominator | Economic | Low | open |
@@ -47,27 +48,25 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 
 ### AV-01 Zero-delta `modifyLiquidity` triggers a claim
 
-- **Attack**: v4 sends `modifyLiquidity` calls with `liquidityDelta == 0` (used to collect fees) through the remove path, so `beforeRemoveLiquidity` runs. If the hook settles a claim without checking the delta, every such call pays out again.
-- **Defense**: none.
+- **Attack**: v4 sends `modifyLiquidity` calls with `liquidityDelta == 0` (used to collect fees) through the remove path, so the remove callbacks (`afterRemoveLiquidity`) run. If the hook settles a claim without checking the delta, every such call pays out again.
+- **Defense**: only `liquidityDelta < 0` settles a claim (design-logic, Design decisions).
 - **Check**
   - [ ] Test: losing position held past H, repeated zero-delta calls. Reserve unchanged.
-  - [ ] `_beforeRemoveLiquidity` returns early when `liquidityDelta >= 0`.
+  - [ ] `_afterRemoveLiquidity` returns a zero delta when `liquidityDelta >= 0`.
 
 ### AV-02 Spot vs Pₓ mismatch
 
 - **Attack**: the exit amounts x₁, y₁ depend on the pool's spot price, but IL values them at the reference price Pₓ. Within one unlock, the attacker swaps spot away from Pₓ, removes liquidity, and swaps back. Valued at Pₓ, the position looks like a large loser even though Pₓ never moved. The same trick at entry inflates x₀, y₀. It pays when c × the inflated IL exceeds the round-trip swap cost.
-- **Defense**: none.
+- **Defense**: x₀, y₀, x₁, y₁ are computed from the removed liquidity and range at Pₑ and Pₓ, never read from the pool. Spot does not enter IL.
 - **Check**
   - [ ] Test: flash-swap → remove → swap back across position widths and pool depths. Claim vs round-trip cost.
-  - [ ] Design: derive x₁, y₁ (and x₀, y₀) from liquidity at Pₓ (Pₑ), or reject claims when |spot − Pₓ| exceeds a bound.
 
 ### AV-03 Payout recipient
 
 - **Attack**: the `sender` the hook sees is the contract that called the PoolManager, not the LP. Through PositionManager it is PositionManager itself, with `salt = tokenId`. A payout sent to `sender` is stuck there, or goes to whoever controls a custom router. Position NFTs can also be transferred, so the current holder may not be the original depositor.
-- **Defense**: none.
+- **Defense**: payout settled in `afterRemoveLiquidity` and returned as a hook delta credited to the caller, so it follows the removed liquidity to the NFT owner. A transferred NFT carries its claim to the new owner (accepted).
 - **Check**
   - [ ] Test: claims through PositionManager and a custom router. Trace the tokens.
-  - [ ] Design: pick a recipient. Options are a credit on the caller's delta (needs `afterRemoveLiquidityReturnDelta`) or an allowlist of position managers that resolve the tokenId owner.
 
 ### AV-04 Deposit, move the reference price, withdraw
 
@@ -80,19 +79,17 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 ### AV-05 Hold timer bypass
 
 - **Attack**: open a dust position, wait H, add a large amount to the same key, claim.
-- **Defense**: none. The weighted-average entry covers x₀, y₀ and Pₑ, not the entry time.
+- **Defense**: entry time is liquidity-weighted on top-ups, like Pₑ.
 - **Check**
   - [ ] Test: dust at t₀, top-up at t₀ + H, claim one block later. Payout zero or limited to the dust.
-  - [ ] Design: liquidity-weight the entry time, or track hold per tranche.
 
 ### AV-06 Pro-rata share in liquidity units
 
 - **Attack**: liquidity units do not compare across ranges. A one-tick position has far more L per dollar than a full-range one, so it gets a far larger share. If the denominator is in-range liquidity, the attacker can also push spot into a thinly covered region where their position dominates. Either way m × share can approach the whole reserve.
-- **Defense**: none.
+- **Defense**: share is the position's hold value at Pₓ over the hold value at Pₓ of all open positions, tracked by the hook as running totals.
 - **Check**
   - [ ] Test: one-tick vs full-range position of equal value. Compare caps.
   - [ ] Test: spot pushed into thin liquidity before the claim.
-  - [ ] Design: share by value at Pₓ over pool TVL at Pₓ, or a time-averaged denominator.
 
 ### AV-07 Splitting across salts
 
@@ -104,7 +101,7 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 ### AV-08 Partial-removal rounding
 
 - **Attack**: many small removals rounding in the claimant's favour, or x₀, y₀ scaling that drifts upward.
-- **Defense**: none.
+- **Defense**: payouts round down; record scaling rounds against the claimant.
 - **Check**
   - [ ] Fuzz: sum of N partial claims ≤ one full claim; record ends at zero.
   - [ ] Payout rounds down; record scaling rounds against the claimant.
@@ -119,9 +116,8 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 ### AV-10 Payout token mix
 
 - **Attack**: reserve holds both tokens; payout is valued at Pₓ. With Pₓ off market, the claimant takes the undervalued token.
-- **Defense**: payout denominated in token1 value, paid in the reserve's mix at Pₓ; no swap.
+- **Defense**: payout denominated in token1 value, drawn from both reserve tokens pro rata by value at Pₓ; the claimant does not choose. A skewed Pₓ is bounded by the Chainlink/TWAP deviation check (AV-15).
 - **Check**
-  - [ ] Design: fixed mix rule (for example token1 first).
   - [ ] Test: Pₓ skewed ±5% from spot.
 
 ### AV-11 Wash trading
@@ -140,15 +136,14 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 - **Check**
   - [ ] Test: one swap vs N swaps in one unlock to the same price. Compare total surcharge.
   - [ ] Backtest: reserve accrual under rational splitting.
-  - [ ] Design: measure loss per unlock or per block from a stored start price.
+  - [ ] Design: evaluate the per-block ratchet candidate in design-logic (Design decisions) in the backtest.
 
 ### AV-13 Exact-output swaps
 
 - **Attack**: `afterSwapReturnDelta` applies only to the unspecified currency. On exact-output swaps that is the input token; the output token cannot be charged.
-- **Defense**: loss computed from actual deltas in both directions. Does not cover the charged currency.
+- **Defense**: the surcharge is charged in the unspecified currency: output token on exact-in, input token on exact-out, converted at P₁.
 - **Check**
   - [ ] Tests: zeroForOne × exactIn/exactOut. Assert charged currency, delta sign, amount in token1 value.
-  - [ ] Design: charge the input token on exact-output swaps, converted at P₁.
 
 ### AV-14 Surcharge arithmetic
 
@@ -157,15 +152,25 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
   - [ ] Decimals: USDC 6 / WETH 18, and a pair with token0 decimals > token1 decimals.
   - [ ] Returned delta fits int128 and never exceeds the unspecified amount.
   - [ ] Fuzz: loss ≥ 0 both directions; surcharge rounds toward the reserve.
+  - [ ] Swap that empties the active range: post-swap price is the tick boundary. Surcharge must be bounded by the swap's output and must not overflow in the intermediate product ([results](07-backtest-results.md#8-findings-for-the-hook-from-the-data)).
+
+### AV-28 Per-swap loss over-counts in-block round trips
+
+- **Attack / defect**: Δy − Δx·P₁ is positive for every swap, including both legs of a round trip that leaves LPs where they started (sandwiches, back-runs, noise that reverses within the block). Summed per swap, it overstates LVR. Two effects: the surcharge charges flow that causes LPs no lasting loss, pushing the pool's effective fee above the routing target (AV-26), and reserve inflow looks far larger than the loss it is meant to cover, which hides the real coverage ceiling.
+- **Evidence**: backtest, Ethereum mainnet ETH/USDC 5 bps, 2025-01-28 to 2025-02-09. Loss measured per block is 12–21% of the per-swap sum. At k = 0.1 the per-swap surcharge is 3.9 bps of volume against a ~2 bps target, 87% of it from the top 1% of trades.
+- **Defense**: none.
+- **Check**
+  - [ ] Backtest over several months on Base: per-swap vs per-block loss, and surcharge bps under each.
+  - [ ] Design: adopt or replace the per-block ratchet candidate (shared with AV-12), and re-fix k against the per-block measure.
+  - [ ] Test: a sandwich (front-run, victim, back-run) in one block pays surcharge only on the net price move.
 
 ## Oracle
 
 ### AV-15 TWAP fallback
 
 - **Attack**: v4 core keeps no price observations, so a TWAP fallback has to be built and stored by the hook. On new or thin pools it is cheap to move, and with a single sequencer on Base, holding a price across several blocks is realistic.
-- **Defense**: none.
+- **Defense**: TWAP is a fallback and cross-check to Chainlink, not the sole source; a Chainlink/TWAP deviation beyond a bound pays zero. Cardinality, window, deviation bound and minimum depth are pending the backtest.
 - **Check**
-  - [ ] Design: Chainlink-only pools, or specify observation storage, cardinality, window and minimum depth.
   - [ ] Simulation: cost to move the TWAP by X% over the window.
 
 ### AV-16 Same-block reference manipulation
@@ -178,7 +183,7 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 ### AV-17 Oracle failure blocks withdrawals
 
 - **Attack**: the feed reverts, is stale, returns zero or a negative value, or the L2 sequencer is down. If the hook reverts on any of these, every removal reverts and LP funds are locked until the feed recovers.
-- **Defense**: none.
+- **Defense**: all oracle reads wrapped; stale or invalid Chainlink falls back to the TWAP; if neither is usable the payout is zero and removal proceeds. Sequencer-uptime feed with grace period.
 - **Check**
   - [ ] Oracle read in try/catch; any failure means payout 0 and the removal proceeds.
   - [ ] Tests: reverting feed, stale `updatedAt`, `answer <= 0`, sequencer down, grace period, decimals ≠ 8.
@@ -188,18 +193,19 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 ### AV-18 Cross-pool drain
 
 - **Attack**: the hook's ERC-6909 balance on the PoolManager is per currency, not per pool. Anyone can initialize a pool on the hook, for example ETH/ScamToken. If per-pool accounting is wrong, claims in that pool are paid from ETH collected by a legitimate pool.
-- **Defense**: none.
+- **Defense**: one hook per pool. The hook's ERC-6909 balance is that pool's reserve.
 - **Check**
-  - [ ] Invariant: per currency, Σ pool reserves ≤ hook ERC-6909 balance; no payout exceeds its pool's reserve.
-  - [ ] Test: two pools sharing ETH; draining one leaves the other unchanged.
+  - [x] Test `test_AV18_secondPoolSharingCurrencyReverts`: a pool sharing currency0 with the reserve cannot be initialized on the hook.
+  - [ ] Invariant once payouts exist: no payout exceeds the hook's ERC-6909 balance.
 
 ### AV-19 Initializer-set parameters
 
 - **Attack**: `afterInitialize` receives no hookData, so the design does not yet say where per-pool parameters come from. If the initializer can choose them, an attacker initializes a pool with a false oracle and claims fake IL. Combined with AV-18, that drains other pools.
-- **Defense**: none.
+- **Defense**: tokens, fee and tick spacing are constructor immutables and `afterInitialize` reverts for any other key. k, c, H, m and oracle settings join them once fixed.
 - **Check**
-  - [ ] Design: parameters from constructor constants or a fixed table keyed by currency pair.
-  - [ ] Test: initialize with an arbitrary oracle; rejected or ignored.
+  - [x] Constructor fixes currency0, currency1, fee and tickSpacing; `_afterInitialize` reverts with `PoolNotAllowed` for any other key. Re-initializing the same key is rejected by the PoolManager.
+  - [x] Test `test_AV19_otherPoolKeyReverts`: other fee and other tick spacing revert with `PoolNotAllowed`.
+  - [ ] k, c, H, m and oracle settings added as constructor immutables once the backtest fixes them.
 
 ### AV-20 Reentrancy during payout
 
@@ -212,7 +218,7 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 
 - **Attack**: a branch leaves the hook with a non-zero delta; the unlock reverts with `CurrencyNotSettled`.
 - **Check**
-  - [ ] Tests: every branch of `_afterSwap` and `_beforeRemoveLiquidity` (zero surcharge, empty reserve, partial reserve) settles.
+  - [ ] Tests: every branch of `_afterSwap` and `_afterRemoveLiquidity` (zero surcharge, empty reserve, partial reserve) settles.
 
 ### AV-22 Native ETH
 
@@ -221,13 +227,15 @@ Status: `open`, `design-fix`, `test-written`, `mitigated`, `accepted`. A vector 
 
 ### AV-23 Fee-on-transfer and rebasing tokens
 
+- **Defense**: one hook per pool; the deployer fixes both tokens in the constructor.
 - **Check**
-  - [ ] Decide: reject at `afterInitialize`, or rely on AV-18 isolation.
+  - [ ] Deployment checklist: both tokens are standard ERC-20 or native ETH.
 
 ### AV-24 Callbacks outside the PoolManager
 
+- **Defense**: `onlyPoolManager` from `BaseHook` on every entrypoint.
 - **Check**
-  - [ ] Test: every external hook entrypoint called from an EOA reverts.
+  - [x] Test `test_AV24_callbacksOnlyPoolManager`: all five entrypoints revert with `NotPoolManager` when called directly.
 
 ## Economic
 

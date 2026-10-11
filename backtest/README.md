@@ -18,11 +18,25 @@ Fetches `Initialize`, `Swap` and `ModifyLiquidity` logs for the pool in 10k-bloc
 uv run python -m ballast_backtest.indexer --chain mainnet --fee 500
 ```
 
+Any other pool: pass its id, a directory name and its initialization block. Token decimals are read on-chain.
+
+```bash
+uv run python -m ballast_backtest.indexer --chain mainnet --pool-id 0x... --name eth-wcup --from-block 25290000
+```
+
+To find candidates, rank pools by recent swap count across sampled windows:
+
+```bash
+uv run python -m ballast_backtest.discover --windows 6 --top 30
+```
+
 ## Replay
 
 ```bash
 uv run python -m ballast_backtest.replay --chain mainnet --fee 500 --k 0.1,0.2,0.3 --c 0.3,0.5 --H 24,72 --m 2,3,5 --out results
 ```
+
+For a pool quoted in ETH, report in ETH with `--name eth-wcup --numeraire token0 --unit ETH`. `--skip-days N` drops the launch period from surcharges and closes.
 
 Reports, per the design doc: surcharge as bps of volume and per median trade, reserve-to-claims ratio, share of eligible losing LPs made whole to c, and a monthly inflow-versus-claims table.
 

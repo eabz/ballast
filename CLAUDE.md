@@ -4,7 +4,7 @@ Ballast is a Uniswap v4 hook (`BallastReserveHook`) that collects a per-swap sur
 
 ## Current phase
 
-Scaffolded, not implemented. `src/BallastReserveHook.sol` has the final permission flags and pass-through callbacks with a TODO per callback. Do not implement the economics until the backtest in `docs/roadmap.md` has fixed k, c, H and m and the `design-fix` vectors in `docs/06-attack-vectors.md` are resolved.
+Scaffolded, not implemented. `src/BallastReserveHook.sol` has the final permission flags and pass-through callbacks with a TODO per callback. Do not implement the economics until the backtest in `docs/roadmap.md` has fixed k, c, H and m and the remaining `design-fix` vectors in `docs/06-attack-vectors.md` are resolved. Resolved decisions are in the Design decisions section of `docs/design-logic.md`.
 
 ## Docs layout
 
@@ -16,7 +16,8 @@ Scaffolded, not implemented. `src/BallastReserveHook.sol` has the final permissi
 - `forge build` and `forge test` from the repo root. Run `forge fmt` before committing.
 - Dependencies are submodules pinned in `foundry.lock`; use `forge install` rather than editing `lib/` by hand.
 - Imports use the `@uniswap/v4-core/`, `@uniswap/v4-periphery/` and `@openzeppelin/uniswap-hooks/` remappings. `SwapParams` and `ModifyLiquidityParams` come from `types/PoolOperation.sol`, not `IPoolManager`.
-- Tests deploy the hook with `deployCodeTo` at an address carrying the six flag bits; see the `FLAGS` constant in the test.
+- Tests deploy the hook with `deployCodeTo` at an address carrying the seven flag bits; see the `FLAGS` constant in the test. The constructor takes the pool's currency0, currency1, fee and tickSpacing.
+- Every attack-vector fix ships with a test named `test_AVnn_*` and an update to that vector in `docs/06-attack-vectors.md`.
 
 ## Source of truth
 

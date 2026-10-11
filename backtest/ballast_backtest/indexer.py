@@ -82,6 +82,12 @@ def fetch_chunk(rpc: Rpc, chain, pool_id: str, start: int, end: int, path: str):
     return {"swaps": [decode_swap(l) for l in raw["swaps"]], "mods": [decode_modify(l) for l in raw["mods"]]}
 
 
+def token_decimals(rpc: Rpc, addr: str) -> int:
+    if int(addr, 16) == 0:
+        return 18
+    return int(rpc.call("eth_call", [{"to": addr, "data": "0x313ce567"}, "latest"]), 16)
+
+
 def find_initialize(rpc: Rpc, chain, pool_id: str, start: int, head: int):
     for s in range(start, head + 1, CHUNK):
         logs = rpc.get_logs(chain.pool_manager, [INITIALIZE_TOPIC, pool_id], s, min(s + CHUNK - 1, head))
@@ -95,13 +101,15 @@ def sample_timestamps(rpc: Rpc, start: int, end: int, path: str):
     if os.path.exists(path):
         df = pd.read_parquet(path)
         have = dict(zip(df["block"], df["timestamp"]))
-    blocks = [b for b in range(start - start % SAMPLE_EVERY, end + SAMPLE_EVERY, SAMPLE_EVERY) if b not in have]
-    blocks.append(end) if end not in have else None
+    blocks = [b for b in range(start - start % SAMPLE_EVERY, end + 1, SAMPLE_EVERY) if b not in have]
+    if end not in have and end not in blocks:
+        blocks.append(end)
     for i in range(0, len(blocks), BATCH):
         chunk = blocks[i : i + BATCH]
         res = rpc.batch([("eth_getBlockByNumber", [hex(b), False]) for b in chunk])
         for b, r in zip(chunk, res):
-            have[b] = int(r["timestamp"], 16)
+            if r is not None:
+                have[b] = int(r["timestamp"], 16)
         print(f"timestamps {min(i + BATCH, len(blocks))}/{len(blocks)}", end="\r", flush=True)
     df = pd.DataFrame({"block": sorted(have), "timestamp": [have[b] for b in sorted(have)]})
     df.to_parquet(path, index=False)
@@ -111,19 +119,23 @@ def sample_timestamps(rpc: Rpc, start: int, end: int, path: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--chain", default="mainnet", choices=CHAINS)
-    ap.add_argument("--fee", type=int, default=500)
+    ap.add_argument("--fee", type=int, default=500, help="ETH/USDC fee tier (ignored with --pool-id)")
+    ap.add_argument("--pool-id", default=None, help="any pool id; data goes under data/<chain>/<name>/")
+    ap.add_argument("--name", default=None, help="data directory name for --pool-id")
+    ap.add_argument("--from-block", type=int, default=None, help="start the Initialize scan here (pool's init block)")
     ap.add_argument("--to-block", type=int, default=None)
     ap.add_argument("--max-chunks", type=int, default=None, help="stop after N chunks (smoke test)")
     ap.add_argument("--reverse", action="store_true", help="fetch chunks newest-first; run alongside a forward worker")
     args = ap.parse_args()
 
     chain = CHAINS[args.chain]
-    pool_id = eth_usdc_pool_id(chain, args.fee)
+    pool_id = args.pool_id or eth_usdc_pool_id(chain, args.fee)
+    name = args.name or str(args.fee)
     rpc = Rpc()
     assert rpc.chain_id() == chain.chain_id, "RPC chain id does not match --chain"
     head = args.to_block or rpc.block_number()
 
-    root = os.path.join(os.path.dirname(__file__), "..", "data", chain.name, str(args.fee))
+    root = os.path.join(os.path.dirname(__file__), "..", "data", chain.name, name)
     os.makedirs(os.path.join(root, "chunks"), exist_ok=True)
     print(f"pool {pool_id} on {chain.name}, head {head}")
 
@@ -131,7 +143,8 @@ def main():
     if os.path.exists(init_path):
         init = json.load(open(init_path))
     else:
-        init = find_initialize(rpc, chain, pool_id, chain.v4_deploy_block, head)
+        init = find_initialize(rpc, chain, pool_id, args.from_block or chain.v4_deploy_block, head)
+        init["decimals0"], init["decimals1"] = (token_decimals(rpc, init["currency0"]), token_decimals(rpc, init["currency1"]))
         json.dump(init, open(init_path, "w"))
     print(f"initialized at block {init['block']} sqrtPrice {init['sqrt_price_x96']}")
 

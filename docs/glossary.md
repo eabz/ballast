@@ -5,12 +5,12 @@
 | **Ballast rate (k)** | Fraction of each swap's imposed loss collected as surcharge. 0 < k < 1. |
 | **Coverage cap (c)** | Maximum fraction of a position's realized IL that is reimbursed. |
 | **Minimum hold (H)** | Time a position must stay open before a claim is valid. |
-| **Pro-rata multiplier (m)** | Multiplier on a claim's liquidity share; bounds one claim's draw on the reserve. |
+| **Pro-rata multiplier (m)** | Multiplier on a claim's value share; bounds one claim's draw on the reserve. |
 | **Reserve** | Pool-owned balance of ERC-6909 claims on the PoolManager, funded by surcharges and drawn by payouts. |
-| **Surcharge** | k · (Δy − Δx · P₁), taken in the output token in `afterSwap`. |
+| **Surcharge** | k · (Δy − Δx · P₁), taken in `afterSwap` in the unspecified currency. |
 | **Impermanent loss (IL)** | Value of a position at exit versus the value of simply holding the deposited amounts, measured over the position's life. |
-| **Loss-versus-rebalancing (LVR)** | The same loss measured swap by swap. Sum over swaps of Δy − Δx · P₁. |
-| **Reference price** | Chainlink feed or long-window TWAP used for Pₑ and Pₓ. Never spot. |
+| **Loss-versus-rebalancing (LVR)** | The same loss measured against continuous rebalancing. Approximated by Δy − Δx · P₁ summed per block, not per swap (AV-28). |
+| **Reference price** | Chainlink feed, with the hook's own ≥ 30 min TWAP as fallback and cross-check, used for Pₑ and Pₓ. Never spot. |
 | **Pₑ, Pₓ** | Reference price at position entry and exit, token1 per token0. |
 | **P₀, P₁** | Pool price before and after a swap, token1 per token0. |
 | **x₀, y₀** | Token0 and token1 amounts recorded at entry. |

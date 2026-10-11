@@ -1,0 +1,7 @@
+split_threshold_usd,N,share_of_swaps_split,reserve_share_remaining
+10000,2,0.0,1.0
+10000,5,0.0,1.0
+10000,10,0.0,1.0
+100000,2,0.0,1.0
+100000,5,0.0,1.0
+100000,10,0.0,1.0

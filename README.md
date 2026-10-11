@@ -44,9 +44,10 @@ forge test
 
 | Path | Contents |
 | --- | --- |
-| `src/BallastReserveHook.sol` | The hook. Flags are final; each callback has a TODO. |
-| `test/BallastReserveHook.t.sol` | Flag assertions, swap pass-through, removal never blocked. |
+| `src/BallastReserveHook.sol` | The hook. Seven permission flags; each callback has a TODO. |
+| `test/BallastReserveHook.t.sol` | Flag assertions, attack-vector tests (`test_AVnn_*`), swap pass-through, removal never blocked. |
 | `script/00_DeployHook.s.sol` | Mines a CREATE2 salt matching the flag bits and deploys. |
 | `script/01..03_*.s.sol` | Create a pool, add liquidity, swap. From the template. |
 | `test/utils/` | Deployment and position helpers from the template. |
 | `backtest/` | Python indexer and replay for the parameter backtest. See [backtest/README.md](backtest/README.md). |
+| `web/` | Next.js dapp for the testnets: swap, pool and reserve views. See [web/README.md](web/README.md). |

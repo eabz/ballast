@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/* Ballast palette. Layout follows the common DEX pattern; colours, mark and type are our own. */
+:root {
+  --background: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f5f7f8;
+  --surface-3: #eaeef0;
+  --border: #e4e9eb;
+  --text: #121a1d;
+  --text-2: #64737a;
+  --text-3: #9aa7ac;
+  --accent: #0b8f9c;
+  --accent-hover: #0a7d88;
+  --accent-soft: #e2f4f5;
+  --accent-contrast: #ffffff;
+  --success: #1a9e5c;
+  --warning: #c27c0e;
+  --critical: #d6413a;
+  --glow: rgba(11, 143, 156, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0d1214;
+    --surface: #0d1214;
+    --surface-2: #151c1f;
+    --surface-3: #1e272b;
+    --border: #1f292d;
+    --text: #eef3f4;
+    --text-2: #93a3a9;
+    --text-3: #5f6f75;
+    --accent: #2cc4d1;
+    --accent-hover: #4dd3de;
+    --accent-soft: #10292c;
+    --accent-contrast: #062023;
+    --success: #3ccf86;
+    --warning: #e7a93c;
+    --critical: #f2665e;
+    --glow: rgba(44, 196, 209, 0.10);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-critical: var(--critical);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background:
+    radial-gradient(60rem 30rem at 50% -10rem, var(--glow), transparent 70%),
+    var(--background);
+  color: var(--text);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* Strip number-input spinners from amount fields. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
